@@ -2,8 +2,9 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8" />
-  <title>How to print money</title>
+  <title>How to print money edited in Adobe Photoshop™</title>
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/html2pdf.js/0.10.1/html2pdf.bundle.min.js"></script>
   <style>
     body {
       margin: 40px;
@@ -13,21 +14,80 @@
       flex-direction: column;
       align-items: center;
       justify-content: flex-start;
-      padding-top: 120px;
+      padding-top: 60px;
     }
 
     .title {
-      font-size: 48px;
+      font-size: 28px;
       font-weight: bold;
       margin-bottom: 40px;
       text-align: center;
       background: url('bg_1.png');
       background-size: cover;
-      background-position: center;
       -webkit-background-clip: text;
       -webkit-text-fill-color: transparent;
-      text-shadow: 2px 2px 3px black;
-      transition: background-image 1s ease;
+      text-shadow: 0 0 1px black;
+    }
+
+    .bill-container {
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+    }
+
+    .bill {
+      position: relative;
+      width: 600px;
+      height: 300px;
+      margin: 10px;
+      background-color: #f9f9f2;
+      box-shadow: 0 6px 14px rgba(0,0,0,0.25);
+      overflow: hidden;
+    }
+
+    .background {
+      position: absolute;
+      top: 0; left: 0;
+      width: 100%;
+      height: 100%;
+      background-size: cover;
+      background-position: center;
+      z-index: 0;
+    }
+
+    .patch {
+      position: absolute;
+      background-size: contain;
+      background-repeat: no-repeat;
+      background-position: center;
+      z-index: 1;
+    }
+
+    #serial {
+      left: 20px; top: 20px; width: 30px; height: 110px;
+      background: none;
+      font-family: 'Times New Roman', serif;
+      font-size: 14px;
+      line-height: 1.2;
+      white-space: pre-line;
+    }
+
+    #text         { left: 60px; top: 20px; width: 80px; height: 40px; }
+    #value_small  { left: 60px; top: 240px; width: 80px; height: 40px; }
+    #currency     { left: 150px; top: 240px; width: 80px; height: 40px; }
+    #portrait     { left: 247px; top: 70px; width: 184px; height: 184px; }
+    #value_big    { left: 300px; top: 20px; width: 140px; height: 60px; opacity: 0.9; }
+    #hologram     { left: 460px; top: 180px; width: 80px; height: 80px; border-radius: 8px; }
+    #hologram_alt { left: 60px; top: 200px; width: 40px; height: 40px; z-index: 2; }
+    #stripe       { left: 570px; top: 0px; width: 10px; height: 300px; }
+
+    .illegal {
+      position: absolute;
+      left: 150px;
+      top: 225px;
+      font-size: 9px;
+      color: white;
+      z-index: 3;
     }
 
     .print-btn {
@@ -41,30 +101,133 @@
       font-weight: bold;
       cursor: pointer;
     }
+
+    @media print {
+      body {
+        margin: 0;
+        background: white;
+      }
+      .title, .print-btn {
+        display: none;
+      }
+      .bill-container {
+        flex-wrap: wrap;
+        flex-direction: row;
+        gap: 0;
+        justify-content: flex-start;
+      }
+      .bill {
+        page-break-inside: avoid;
+      }
+    }
   </style>
 </head>
 <body>
   <div class="title">How to print money edited in Adobe Photoshop™</div>
-  <button class="print-btn" onclick="alert('PDF logic not included here.')">PRINT!</button>
 
+  <div class="bill-container" id="bill-container">
+    <div class="bill" id="bill">
+      <div class="background" id="background"></div>
+      <div class="patch" id="text"></div>
+      <div class="patch" id="value_small"></div>
+      <div class="patch" id="currency"></div>
+      <div class="patch" id="stripe"></div>
+      <div class="patch" id="portrait"></div>
+      <div class="patch" id="value_big"></div>
+      <div class="patch" id="hologram"></div>
+      <div class="patch" id="hologram_alt"></div>
+      <div class="patch" id="serial"><div id="serialText">ABC1234567</div></div>
+      <div class="illegal">THIS NOTE IS ILLEGAL TENDER</div>
+    </div>
+  </div>
+
+  <button class="print-btn" onclick="generatePDF()">PRINT!</button>
+
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/html2pdf.js/0.10.1/html2pdf.bundle.min.js"></script>
   <script>
+    function updateSerial() {
+      const chars = "ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789";
+      let serial = "";
+      for (let i = 0; i < 10; i++) {
+        serial += chars.charAt(Math.floor(Math.random() * chars.length)) + "\n";
+      }
+      const serialEl = document.getElementById("serialText");
+      serialEl.textContent = serial.trim();
+      serialEl.style.color = Math.random() > 0.5 ? "black" : "white";
+      setTimeout(updateSerial, Math.random() * 3000 + 1000);
+    }
+
     const backgroundImages = ['bg_1.png', 'bg_2.png', 'bg_3.png'];
     let currentBG = 0;
 
     function rotateBackground() {
       currentBG = (currentBG + 1) % backgroundImages.length;
       const bg = backgroundImages[currentBG];
-      const title = document.querySelector(".title");
-      title.style.background = `url('${bg}')`;
-      title.style.backgroundSize = "cover";
-      title.style.backgroundPosition = "center";
-      title.style.webkitBackgroundClip = "text";
-      title.style.webkitTextFillColor = "transparent";
-      title.style.textShadow = "2px 2px 3px black";
+      document.getElementById("background").style.backgroundImage = `url('${bg}')`;
+      document.querySelector(".title").style.background = `url('${bg}')`;
+      document.querySelector(".title").style.backgroundSize = "cover";
+      document.querySelector(".title").style.webkitBackgroundClip = "text";
+      document.querySelector(".title").style.webkitTextFillColor = "transparent";
       setTimeout(rotateBackground, Math.random() * 6000 + 3000);
     }
 
+    const holograms = ['hologram_1.png', 'hologram_2.png'];
+    function rotateHolograms() {
+      const idx = Math.floor(Math.random() * holograms.length);
+      const altIdx = (idx + 1) % holograms.length;
+      document.getElementById("hologram").style.backgroundImage = `url('${holograms[idx]}')`;
+      document.getElementById("hologram_alt").style.backgroundImage = `url('${holograms[altIdx]}')`;
+      setTimeout(rotateHolograms, Math.random() * 4000 + 2000);
+    }
+
+    const patches = {
+      value_small: ['value_small_1.png', 'value_small_2.png', 'value_small_3.png'],
+      value_big: ['value_big_1.png', 'value_big_2.png', 'value_big_3.png'],
+      currency: ['currency_1.png', 'currency_2.png'],
+      stripe: ['stripe_1.png', 'stripe_2.png'],
+      portrait: ['portrait_1.png', 'portrait_2.png'],
+      text: ['text_1.png', 'text_2.png']
+    };
+
+    function updatePatch(id, images) {
+      const el = document.getElementById(id);
+      function change() {
+        const img = images[Math.floor(Math.random() * images.length)];
+        el.style.backgroundImage = `url('${img}')`;
+        setTimeout(change, Math.random() * 4000 + 1500);
+      }
+      change();
+    }
+
+    function generatePDF() {
+      const bill = document.getElementById("bill");
+      const wrapper = document.createElement("div");
+      wrapper.style.display = "flex";
+      wrapper.style.flexWrap = "wrap";
+      wrapper.style.margin = "0";
+
+      const width = 600, height = 300;
+      const maxW = 595.28, maxH = 841.89;
+      const perRow = Math.floor(maxW / width);
+      const perCol = Math.floor(maxH / height);
+      const total = Math.max(1, perRow * perCol);
+
+      for (let i = 0; i < total; i++) {
+        wrapper.appendChild(bill.cloneNode(true));
+      }
+
+      html2pdf().set({
+        margin: 0,
+        filename: 'money_sheet.pdf',
+        html2canvas: { scale: 2 },
+        jsPDF: { unit: 'pt', format: 'a4', orientation: 'portrait' }
+      }).from(wrapper).save();
+    }
+
+    updateSerial();
     rotateBackground();
+    rotateHolograms();
+    for (let id in patches) updatePatch(id, patches[id]);
   </script>
 </body>
 </html>
