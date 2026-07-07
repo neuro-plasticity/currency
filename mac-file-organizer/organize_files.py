@@ -41,7 +41,9 @@ import hashlib
 import os
 import re
 import shutil
+import subprocess
 import sys
+import tempfile
 from collections import defaultdict
 from pathlib import Path
 
@@ -176,6 +178,130 @@ def find_duplicates(files: list[Path]) -> tuple[list[Path], dict[Path, Path]]:
     return originals, duplicates
 
 
+# ---------------------------------------------------------------------------
+# Similar-image detection (--find-similar)
+#
+# Exact duplicates are found by content hash above, but a re-compressed or
+# resized photo has different bytes. Perceptual hashing fingerprints what
+# the image LOOKS like instead: shrink it to a tiny grayscale grid, then
+# record which neighboring pixels get brighter/darker ("dhash"). Similar
+# pictures differ in only a few of the 64 bits. This is a judgment call,
+# not a certainty, so results are only REPORTED, never moved.
+# ---------------------------------------------------------------------------
+
+# raster formats macOS's built-in `sips` tool can decode
+SIMILAR_IMAGE_EXTS = {".jpg", ".jpeg", ".png", ".gif", ".tiff", ".tif",
+                      ".bmp", ".heic", ".heif", ".webp"}
+
+
+def _parse_bmp_gray(data: bytes) -> list:
+    """Decode an uncompressed 24/32-bit BMP into rows of luminance values.
+
+    BMP is simple enough to parse with no libraries, which is why sips is
+    asked to output it.
+    """
+    if data[:2] != b"BM":
+        raise ValueError("not a BMP file")
+    pixel_offset = int.from_bytes(data[10:14], "little")
+    width = int.from_bytes(data[18:22], "little", signed=True)
+    height = int.from_bytes(data[22:26], "little", signed=True)
+    bpp = int.from_bytes(data[28:30], "little")
+    compression = int.from_bytes(data[30:34], "little")
+    if bpp not in (24, 32) or compression != 0:
+        raise ValueError(f"unsupported BMP ({bpp} bpp, compression "
+                         f"{compression})")
+    bottom_up = height > 0          # BMP rows are stored bottom-up by default
+    height = abs(height)
+    bytes_pp = bpp // 8
+    row_size = (width * bytes_pp + 3) // 4 * 4   # rows pad to 4 bytes
+    grid = []
+    for y in range(height):
+        src_y = (height - 1 - y) if bottom_up else y
+        start = pixel_offset + src_y * row_size
+        row = []
+        for x in range(width):
+            i = start + x * bytes_pp
+            b, g, r = data[i], data[i + 1], data[i + 2]   # BMP stores BGR
+            row.append(0.299 * r + 0.587 * g + 0.114 * b)  # luminance
+        grid.append(row)
+    return grid
+
+
+def image_gray_grid(path: Path, width: int = 9, height: int = 8) -> list:
+    """Shrink an image to width x height grayscale via macOS's `sips`."""
+    if shutil.which("sips") is None:
+        raise RuntimeError("the sips tool was not found - "
+                           "--find-similar needs macOS")
+    with tempfile.TemporaryDirectory() as td:
+        out = Path(td) / "small.bmp"
+        result = subprocess.run(
+            ["sips", "-s", "format", "bmp", "-z", str(height), str(width),
+             str(path), "--out", str(out)],
+            capture_output=True, text=True)
+        if result.returncode != 0 or not out.exists():
+            raise RuntimeError((result.stderr or result.stdout).strip()
+                               or "sips failed")
+        return _parse_bmp_gray(out.read_bytes())
+
+
+def dhash_from_grid(grid: list) -> int:
+    """64-bit difference hash: 1 bit per neighboring-pixel comparison."""
+    bits = 0
+    for row in grid:
+        for x in range(len(row) - 1):
+            bits = (bits << 1) | (1 if row[x] > row[x + 1] else 0)
+    return bits
+
+
+def dhash(path: Path) -> int:
+    return dhash_from_grid(image_gray_grid(path))
+
+
+def hamming(a: int, b: int) -> int:
+    """How many of the 64 fingerprint bits differ."""
+    return bin(a ^ b).count("1")
+
+
+def find_similar_images(files: list, threshold: int, hasher=dhash) -> list:
+    """Return (image_a, image_b, distance) pairs that look alike.
+
+    `hasher` is injectable so the pairing logic can be tested without sips.
+    """
+    hashes = {}
+    for f in sorted(files):
+        if f.suffix.lower() not in SIMILAR_IMAGE_EXTS:
+            continue
+        try:
+            hashes[f] = hasher(f)
+        except (RuntimeError, ValueError, OSError) as e:
+            print(f"  ! skipping {f.name}: {e}", file=sys.stderr)
+    items = list(hashes.items())
+    pairs = []
+    for i in range(len(items)):
+        for j in range(i + 1, len(items)):
+            d = hamming(items[i][1], items[j][1])
+            if d <= threshold:
+                pairs.append((items[i][0], items[j][0], d))
+    pairs.sort(key=lambda t: t[2])
+    return pairs
+
+
+def report_similar(files: list, threshold: int) -> int:
+    images = [f for f in files if f.suffix.lower() in SIMILAR_IMAGE_EXTS]
+    print(f"Comparing {len(images)} image(s) by visual fingerprint...")
+    pairs = find_similar_images(files, threshold)
+    if not pairs:
+        print("No similar-looking images found.")
+        return 0
+    print(f"Found {len(pairs)} pair(s) that look alike - "
+          "review them yourself, nothing is moved:\n")
+    for a, b, d in pairs:
+        pct = round((64 - d) / 64 * 100)
+        note = "identical-looking" if d == 0 else f"~{pct}% similar"
+        print(f"  {a.name}  ~=  {b.name}   (distance {d}/64, {note})")
+    return 0
+
+
 def unique_target(target: Path) -> Path:
     """If target exists, append -1, -2, ... before the extension."""
     if not target.exists():
@@ -268,6 +394,12 @@ def main() -> int:
                     help="skip the version-renaming step")
     ap.add_argument("--no-sort", action="store_true",
                     help="skip sorting files into category folders")
+    ap.add_argument("--find-similar", action="store_true",
+                    help="report images that LOOK alike (e.g. recompressed "
+                         "or resized copies); report only, moves nothing")
+    ap.add_argument("--similar-threshold", type=int, default=8, metavar="N",
+                    help="max fingerprint distance (0-64) to report as "
+                         "similar (default 8; lower = stricter)")
     args = ap.parse_args()
 
     root = Path(args.folder).expanduser().resolve()
@@ -280,6 +412,9 @@ def main() -> int:
     files = collect_files(root, args.recursive)
     total = sum(f.stat().st_size for f in files)
     print(f"Found {len(files)} files ({human_size(total)}).\n")
+
+    if args.find_similar:
+        return report_similar(files, args.similar_threshold)
 
     print("Checking for duplicates (this hashes file contents)...")
     originals, duplicates = find_duplicates(files)

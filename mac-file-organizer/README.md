@@ -47,6 +47,8 @@ A small, safe command-line tool for macOS that:
 | `--recursive` | Also scan subfolders                                      |
 | `--no-rename` | Skip the version renaming step                            |
 | `--no-sort`   | Keep files where they are; only handle duplicates/versions|
+| `--find-similar` | Report images that *look* alike (report only, see below) |
+| `--similar-threshold N` | How strict `--find-similar` is (0–64, default 8; lower = stricter) |
 
 ## Examples
 
@@ -60,6 +62,37 @@ python3 organize_files.py ~/Documents --no-rename --no-sort --apply
 # Deep-clean Downloads including subfolders (preview first!)
 python3 organize_files.py ~/Downloads --recursive
 ```
+
+## Finding similar (not identical) images
+
+Exact duplicate detection compares file *contents*, so a photo that was
+re-compressed, resized, or lightly edited is **not** an exact duplicate —
+its bytes differ even though it looks the same. For those cases:
+
+```sh
+python3 organize_files.py ~/Pictures --find-similar
+```
+
+This computes a *visual fingerprint* (a "difference hash") for each image
+using macOS's built-in `sips` tool: the image is shrunk to a tiny 9×8
+grayscale grid and each pixel is compared to its neighbor, giving a 64-bit
+signature of the image's light/dark structure. Compression and resizing
+barely change that structure, so lookalike images have nearly identical
+fingerprints. Example output:
+
+```
+Found 2 pair(s) that look alike - review them yourself, nothing is moved:
+
+  IMG_1204.jpg  ~=  IMG_1204 small.jpg   (distance 0/64, identical-looking)
+  beach.png     ~=  beach.jpg            (distance 4/64, ~94% similar)
+```
+
+Unlike exact-duplicate detection, similarity is a judgment call, so this
+mode **only reports** — it never moves or renames anything. Use
+`--similar-threshold` to tune it: `0` reports only identical-looking
+images, higher values (up to 64) report looser matches.
+
+Supported formats: JPEG, PNG, GIF, TIFF, BMP, HEIC/HEIF, WebP.
 
 ## Safety notes
 
