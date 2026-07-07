@@ -188,37 +188,69 @@ def unique_target(target: Path) -> Path:
         n += 1
 
 
-def plan_moves(originals: list[Path], duplicates: dict[Path, Path],
-               dest: Path, rename_versions: bool, sort_folders: bool):
-    """Build the list of (source, target) moves."""
-    moves = []
+def version_names(originals: list[Path]) -> dict[Path, str]:
+    """DECIDE what each file should be called (no side effects).
 
-    # --- version naming: group originals that share a base name + extension
-    version_groups = defaultdict(list)
+    Files sharing a base name and extension are treated as versions of
+    one another and named base_v1, base_v2, ... oldest first. Files with
+    no siblings keep their current name.
+    """
+    groups = defaultdict(list)
     for f in originals:
-        version_groups[(base_name_key(f), f.suffix.lower())].append(f)
+        groups[(base_name_key(f), f.suffix.lower())].append(f)
 
-    for (base, ext), group in sorted(version_groups.items()):
-        group.sort(key=lambda p: p.stat().st_mtime)  # oldest = v1
-        multiple = len(group) > 1
+    names = {}
+    for (base, ext), group in groups.items():
+        if len(group) == 1:
+            names[group[0]] = group[0].name
+            continue
+        # oldest = v1; when timestamps tie, the file without a copy
+        # suffix in its name ("x.txt" vs "x copy.txt") counts as older
+        group.sort(key=lambda p: (p.stat().st_mtime,
+                                  p.stem != strip_copy_suffix(p.stem),
+                                  p.name))
         # keep the original capitalization of the oldest file's name
         display_base = strip_copy_suffix(group[0].stem)
         for i, f in enumerate(group, start=1):
-            folder = dest / category_for(f) if sort_folders else f.parent
-            if rename_versions and multiple:
-                new_name = f"{display_base}_v{i}{f.suffix.lower()}"
-            else:
-                new_name = f.name
-            target = folder / new_name
-            if target != f:
-                moves.append((f, target))
+            names[f] = f"{display_base}_v{i}{f.suffix.lower()}"
+    return names
 
-    # --- duplicates go to the Duplicates folder, never deleted
+
+def plan_moves(originals: list[Path], duplicates: dict[Path, Path],
+               dest: Path, rename_versions: bool, sort_folders: bool):
+    """DECIDE the full (source, target) move list (no side effects)."""
+    names = version_names(originals) if rename_versions \
+        else {f: f.name for f in originals}
+
+    moves = []
+    for f in sorted(originals):
+        folder = dest / category_for(f) if sort_folders else f.parent
+        target = folder / names[f]
+        if target != f:
+            moves.append((f, target))
+
+    # duplicates go to the Duplicates folder, never deleted
     for dup, original in sorted(duplicates.items()):
-        target = dest / DUPLICATES_FOLDER / dup.name
-        moves.append((dup, target))
+        moves.append((dup, dest / DUPLICATES_FOLDER / dup.name))
 
     return moves
+
+
+def execute_moves(moves, root: Path, dest: Path, apply: bool) -> None:
+    """DO the moves (all side effects live here). With apply=False this
+    only prints the plan, which is what makes the dry run trustworthy:
+    preview and real run share exactly the same plan."""
+    for src, target in moves:
+        rel_src = src.relative_to(root) if src.is_relative_to(root) else src
+        try:
+            rel_tgt = target.relative_to(dest)
+        except ValueError:
+            rel_tgt = target
+        print(f"  {rel_src}  ->  {rel_tgt}")
+        if apply:
+            target = unique_target(target)
+            target.parent.mkdir(parents=True, exist_ok=True)
+            shutil.move(str(src), str(target))
 
 
 def main() -> int:
@@ -271,17 +303,7 @@ def main() -> int:
 
     print(f"{'APPLYING' if args.apply else 'PREVIEW (dry run)'}: "
           f"{len(moves)} change(s)\n")
-    for src, target in moves:
-        rel_src = src.relative_to(root) if src.is_relative_to(root) else src
-        try:
-            rel_tgt = target.relative_to(dest)
-        except ValueError:
-            rel_tgt = target
-        print(f"  {rel_src}  ->  {rel_tgt}")
-        if args.apply:
-            target = unique_target(target)
-            target.parent.mkdir(parents=True, exist_ok=True)
-            shutil.move(str(src), str(target))
+    execute_moves(moves, root, dest, apply=args.apply)
 
     if not args.apply:
         print("\nNothing was changed. Re-run with --apply to make these "
