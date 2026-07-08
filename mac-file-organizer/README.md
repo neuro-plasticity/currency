@@ -22,17 +22,32 @@ A small, safe command-line tool for macOS that:
   If macOS offers to install the developer tools, accept — that installs
   Python 3. No other packages are needed.
 
-## How to use
+## The easy way: double-click the button
 
-1. Download `organize_files.py` (or clone this repo).
-2. Open **Terminal** (Cmd+Space, type "Terminal").
-3. Preview what the tool would do — this changes **nothing**:
+1. Download this folder (both `Organize Files.command` and
+   `organize_files.py`, kept together).
+2. Double-click **`Organize Files.command`** in Finder.
+   - *First time only:* macOS may block it because it was downloaded.
+     Right-click (or Ctrl-click) the file and choose **Open**, then
+     confirm. After that, normal double-clicking works.
+3. Dialogs walk you through everything:
+   - **Which folder** to organize (a folder picker)
+   - **What to do** — Preview (default, changes nothing), Organize
+     for real, or Find similar images
+   - **Extra options** — include subfolders, skip renaming, skip sorting
+4. If you chose Organize, a final warning asks you to confirm before
+   any file moves. Results appear in the Terminal window that opens.
+
+## The Terminal way
+
+1. Open **Terminal** (Cmd+Space, type "Terminal").
+2. Preview what the tool would do — this changes **nothing**:
 
    ```sh
    python3 organize_files.py ~/Downloads
    ```
 
-4. Happy with the preview? Run it for real:
+3. Happy with the preview? Run it for real:
 
    ```sh
    python3 organize_files.py ~/Downloads --apply
